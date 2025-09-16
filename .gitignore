@@ -32,3 +32,4 @@ __pycache__/
 *.index
 *.meta
 chest_xray/
+.venv/
