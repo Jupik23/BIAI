@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import argparse
 from data.dataloader import get_dataloaders
-from models.resnet_transfer import get_model
+from models.resnet_pretrained import get_model
 from utils.plots import plot_training
 
 def train(resume_path=None):
@@ -17,12 +17,10 @@ def train(resume_path=None):
     num_epochs = 10
     history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': []}
 
-    # Domyślne wartości dla checkpointingu
     best_val_loss = float('inf')
     best_epoch = 0
     start_epoch = 0
 
-    # Jeśli podano ścieżkę do checkpointu, wczytujemy stan
     if resume_path is not None:
         checkpoint = torch.load(resume_path, map_location=device)
         model.load_state_dict(checkpoint['model_state_dict'])
@@ -33,7 +31,6 @@ def train(resume_path=None):
         print(f"Wczytano checkpoint z '{resume_path}' (epoka {best_epoch}, val_loss = {best_val_loss:.4f}). Kontynuuję od epoki {start_epoch+1}.")
 
     for epoch in range(start_epoch, num_epochs):
-        # --- Training ---
         model.train()
         running_loss, correct, total = 0.0, 0, 0
         for images, labels in train_loader:
@@ -52,7 +49,6 @@ def train(resume_path=None):
         train_loss = running_loss / len(train_loader)
         train_acc = correct / total
 
-        # --- Validation ---
         model.eval()
         running_loss, correct, total = 0.0, 0, 0
         with torch.no_grad():
@@ -74,7 +70,6 @@ def train(resume_path=None):
               f" Train Loss: {train_loss:.4f} Val Loss: {val_loss:.4f}"
               f" Train Acc: {train_acc:.4f} Val Acc: {val_acc:.4f}")
 
-        # --- Checkpointing ---
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_epoch = current_epoch
@@ -86,23 +81,19 @@ def train(resume_path=None):
             }, 'best_checkpoint.pth')
             print(f"  → New best model (epoka {best_epoch}), checkpoint saved.")
 
-        # --- Record history ---
         history['train_loss'].append(train_loss)
         history['val_loss'].append(val_loss)
         history['train_acc'].append(train_acc)
         history['val_acc'].append(val_acc)
 
-    # --- Po zakończeniu treningu: wczytanie najlepszego modelu ---
     checkpoint = torch.load('best_checkpoint.pth', map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     print(f"Loaded best model from epoki {checkpoint['epoch']} "
           f"(val_loss = {checkpoint['val_loss']:.4f})")
 
-    # --- Zapisywanie najlepszych wag ---
     torch.save(model.state_dict(), 'model.pth')
 
-    # --- Rysowanie wykresów uczenia ---
     plot_training(history)
 
 if __name__ == '__main__':
