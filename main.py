@@ -33,16 +33,16 @@ class LungClassifier:
         for (text, value) in models.items():
             tk.Radiobutton(main, text=text, variable=self.model_var, value=value).pack(anchor=tk.W)
 
-        load_model_button = tk.Button(main, text="Załaduj Model", command=self.load_model)
+        load_model_button = tk.Button(main, text="Load Model", command=self.load_model)
         load_model_button.pack(pady=5)
 
-        select_image_button = tk.Button(main, text="Wybierz Obraz", command=self.select_image)
+        select_image_button = tk.Button(main, text="Choose image", command=self.select_image)
         select_image_button.pack(pady=5)
 
         self.image_label = tk.Label(main)
         self.image_label.pack(pady=10)
         
-        self.result_label = tk.Label(main, text="Wynik: ", font=("Helvetica", 16))
+        self.result_label = tk.Label(main, text="Result: ", font=("Helvetica", 16))
         self.result_label.pack(pady=10)
 
     def load_model(self):
@@ -72,11 +72,10 @@ class LungClassifier:
 
     def classify_image(self, file_path):
         try:
-            prediction_idx = predict_image(file_path, self.model, self.device)
-            result = self.class_names[prediction_idx]
-            self.result_label.config(text=f"Wynik: {result}")
+            result = predict_image(self.model, file_path, self.device, self.class_names)
+            self.result_label.config(text=f"Result: {result}")
         except Exception as e:
-            messagebox.showerror("Błąd", f"Wystąpił błąd podczas klasyfikacji: {e}")
+            messagebox.showerror("ERROR!", f"Error: {e}")
 
 if __name__ == "__main__":
     root = tk.Tk()
