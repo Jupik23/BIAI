@@ -1,106 +1,83 @@
 import torch
-import torch.nn as nn
-import torch.optim as optim
-import argparse
-from data.dataloader import get_dataloaders
-from models.resnet_pretrained import get_model
-from utils.plots import plot_training
+import tkinter as tk
+from tkinter import filedialog, messagebox
+import importlib
+from PIL import Image, ImageTk
+from utils.predict import predict_image
 
 
-class LungClassifierApp():
-    def train(resume_path=None):
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        train_loader, val_loader, test_loader = get_dataloaders()
+class LungClassifier:
+    def __init__ (self, root):
+        self.root = root
+        self.root.title('Binary Classifier')
+        self.model = None
+        self.device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+        self.class_names = ["healthy", "pneumonia"]
 
-        model = get_model().to(device)
-        criterion = nn.CrossEntropyLoss()
-        optimizer = optim.Adam(model.fc.parameters(), lr=0.001)
+    def setup_gui(self):
+        main = tk.Frame(self.root, padx=15, pady=15)
+        main.pack()
+        model = tk.Label(main, text="Choose model")
+        model.pack()
+        self.model_var = tk.StringVar(value="resnet_pretrained")
+        models = {
+            "Pretrained ResNet18": "resnet_pretrained",
+            "ResNet18 (not pretrained)": "resnet_not_pretrained",
+            "ResNet18 + Dropout": "resnet_dropout",
+            "ResNet18 + 2 Dropouts": "resnet_2_dropouts_checkpoint",
+            "Custom Model": "custom"
+        }
 
-        num_epochs = 10
-        history = {'train_loss': [], 'val_loss': [], 'train_acc': [], 'val_acc': []}
+        for (text, value) in models.items():
+            tk.Radiobutton(main, text=text, variable=self.model_var, value=value).pack(anchor=tk.W)
 
-        best_val_loss = float('inf')
-        best_epoch = 0
-        start_epoch = 0
+        load_model_button = tk.Button(main, text="Załaduj Model", command=self.load_model)
+        load_model_button.pack(pady=5)
 
-        if resume_path is not None:
-            checkpoint = torch.load(resume_path, map_location=device)
-            model.load_state_dict(checkpoint['model_state_dict'])
-            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            best_val_loss = checkpoint.get('val_loss', float('inf'))
-            best_epoch = checkpoint.get('epoch', 0)
-            start_epoch = best_epoch
-            print(f"Wczytano checkpoint z '{resume_path}' (epoka {best_epoch}, val_loss = {best_val_loss:.4f}). Kontynuuję od epoki {start_epoch+1}.")
+        select_image_button = tk.Button(main, text="Wybierz Obraz", command=self.select_image)
+        select_image_button.pack(pady=5)
 
-        for epoch in range(start_epoch, num_epochs):
-            model.train()
-            running_loss, correct, total = 0.0, 0, 0
-            for images, labels in train_loader:
-                images, labels = images.to(device), labels.to(device)
-                optimizer.zero_grad()
-                outputs = model(images)
-                loss = criterion(outputs, labels)
-                loss.backward()
-                optimizer.step()
+        self.image_label = tk.Label(main)
+        self.image_label.pack(pady=10)
+        
+        self.result_label = tk.Label(main, text="Wynik: ", font=("Helvetica", 16))
+        self.result_label.pack(pady=10)
 
-                running_loss += loss.item()
-                _, preds = torch.max(outputs, 1)
-                correct += (preds == labels).sum().item()
-                total += labels.size(0)
+    def load_model(self):
+        model_name = self.model_var.get()
+        try:
+            model_module = importlib.import_module(f"models.{model_name}")
+            self.model = model_module.get_model(num_classes=2)
+            self.model.to(self.device)
+            messagebox.showinfo("Success", "Model loaded successfully!")
+        except Exception as e:
+            messagebox.showerror(e)
 
-            train_loss = running_loss / len(train_loader)
-            train_acc = correct / total
+    def select_image(self):
+        if not self.model:
+            messagebox.showwarning("Choose model!")
+        file_path=filedialog.askopenfilename()
+        if file_path:
+            self.display_image(file_path)
+            self.classify_image(file_path)
+    
+    def display_image(self, file_path):
+        img = Image.open(file_path)
+        img.thumbnail((250, 250))
+        img_tk = ImageTk.PhotoImage(img)
+        self.image_label.config(image=img_tk)
+        self.image_label.image = img_tk
 
-            model.eval()
-            running_loss, correct, total = 0.0, 0, 0
-            with torch.no_grad():
-                for images, labels in val_loader:
-                    images, labels = images.to(device), labels.to(device)
-                    outputs = model(images)
-                    loss = criterion(outputs, labels)
+    def classify_image(self, file_path):
+        try:
+            prediction_idx = predict_image(file_path, self.model, self.device)
+            result = self.class_names[prediction_idx]
+            self.result_label.config(text=f"Wynik: {result}")
+        except Exception as e:
+            messagebox.showerror("Błąd", f"Wystąpił błąd podczas klasyfikacji: {e}")
 
-                    running_loss += loss.item()
-                    _, preds = torch.max(outputs, 1)
-                    correct += (preds == labels).sum().item()
-                    total += labels.size(0)
-
-            val_loss = running_loss / len(val_loader)
-            val_acc = correct / total
-
-            current_epoch = epoch + 1
-            print(f"Epoch [{current_epoch}/{num_epochs}]"
-                f" Train Loss: {train_loss:.4f} Val Loss: {val_loss:.4f}"
-                f" Train Acc: {train_acc:.4f} Val Acc: {val_acc:.4f}")
-
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_epoch = current_epoch
-                torch.save({
-                    'epoch': best_epoch,
-                    'model_state_dict': model.state_dict(),
-                    'optimizer_state_dict': optimizer.state_dict(),
-                    'val_loss': best_val_loss,
-                }, 'best_checkpoint.pth')
-                print(f"  → New best model (epoka {best_epoch}), checkpoint saved.")
-
-            history['train_loss'].append(train_loss)
-            history['val_loss'].append(val_loss)
-            history['train_acc'].append(train_acc)
-            history['val_acc'].append(val_acc)
-
-        checkpoint = torch.load('best_checkpoint.pth', map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        print(f"Loaded best model from epoki {checkpoint['epoch']} "
-            f"(val_loss = {checkpoint['val_loss']:.4f})")
-
-        torch.save(model.state_dict(), 'model.pth')
-
-        plot_training(history)
-
-if __name__ == '__main__':
-        parser = argparse.ArgumentParser(description="Trening modelu z możliwością wznowienia z checkpointu")
-        parser.add_argument('--resume', type=str, default=None,
-                            help="Ścieżka do pliku checkpointu, aby wznowić trening (opcjonalne)")
-        args = parser.parse_args()
-        LungClassifierApp.train(resume_path=args.resume)
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = LungClassifier(root)
+    app.setup_gui()
+    root.mainloop()
